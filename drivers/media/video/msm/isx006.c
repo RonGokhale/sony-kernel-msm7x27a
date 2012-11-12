@@ -81,7 +81,9 @@ static uint16_t C_NR = 0xFFFF;
 static uint16_t C_NB = 0xFFFF; 
 static uint16_t C_PR = 0xFFFF; 
 static uint16_t C_PB = 0xFFFF; 
-static uint16_t Shading_index = 0xFFFF;
+/*MM-UW-fix high AF power-00+*/
+static uint16_t current_af_mode = 0;
+/*MM-UW-fix high AF power-00-*/
 
 static uint16_t slave_add;
 /* FIH-SW3-MM-UW-set AF range-00+*/
@@ -131,9 +133,11 @@ struct isx006_ctrl_t {
     enum isx006_resolution_t curr_res;
 };
 
-static bool CSI_CONFIG;
-static bool STARTUP;
+static bool CSI_CONFIG = false;
+static bool STARTUP = false;
 static struct isx006_ctrl_t *isx006_ctrl;
+static bool LowLight = false; /* FIH-SW3-MM-UW-fix night capture fail-00+*/
+
 
 static DECLARE_WAIT_QUEUE_HEAD(isx006_wait_queue);
 static DECLARE_WAIT_QUEUE_HEAD(isx006_af_wait_queue);
@@ -162,8 +166,6 @@ static int16_t isx006_scene = 0;
 static struct task_struct *reg_init_thread = NULL;
 static bool bRegInitDone = false;
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+}
-
-static int32_t isx006_set_sensor_mode(int mode, int res);//FIH-SW-MM-MC-ImplementSensorReSetForIsx006-00+
 
 static int isx006_i2c_rxdata(unsigned short saddr,
         unsigned char *rxdata, int length)
@@ -637,6 +639,8 @@ error:
 }
 /*MM-UW-add auto flash 00+*/
 
+/* FIH-SW3-MM-UW-fix night capture fail-00+*/
+/* FIH-SW3-MM-UW-cancel AF-00+*/
 /* FIH-SW3-MM-UW-check AF lock state-00+*/
 static int isx006_check_AF(unsigned short saddr, const char *tag)
 {
@@ -645,68 +649,60 @@ static int isx006_check_AF(unsigned short saddr, const char *tag)
     uint16_t irq_status = 0x0;
     uint16_t v_read = 0x0;    
     uint16_t v_temp = 0x0;        
-    uint16_t AF_result = 0xFF;
 
-    /* Make sure operation mode is changed */
-    for (i = 0; i < ISX006_AF_RETRY_COUNT; i++)
-    {
-        rc = isx006_i2c_read_parallel(saddr, 0x00F8, &irq_status, BYTE_LEN);
-        if (rc < 0) {
-            pr_err("isx006_check_AF: isx006_i2c_read_parallel failed, saddr(0x%x)/REG(0x%x) !\n",saddr, 0x00F8);
-            goto error;
-        }
-        if (irq_status & 0x10)
-            break;
-        cam_msleep(10);    
-    }
-
-    if (i >= ISX006_AF_RETRY_COUNT)
-    {
-        rc = -ETIME;
-        pr_err("isx006_check_AF: Camera mode changed fail !!!\n");
+    /* 01.Polling the interrupt register--------------------------------------------------------*/
+    rc = isx006_i2c_read_parallel(saddr, 0x00F8, &irq_status, BYTE_LEN);//ADDR_INTSTS0 = 0x00F8
+    if (rc < 0) {
+        pr_err("isx006_check_AF: saddr(0x%x): Read REG(0x%x) failed !\n",saddr, 0x00F8);
         goto error;
     }
-    printk("isx006_check_AF: Camera mode changed\n");
 
+    if (!(irq_status & 0x10))//INTSTS0[4](AF_LOCK_STS)
+    {
+        //printk("isx006_check_AF: AF searching..\n");
+        if(isx006_scene == SCENE_NIGHT)
+            cam_msleep(40); 
+        else
+            cam_msleep(10);    
+        return -EIO;
+    }
 
-    /* Clear interrupt status */
-    //1. Clear interrupt status
+    /* 02.Clear the interrupt register-------------------------------------------------------- */
+    printk("isx006_check_AF: Clear interrupt status !\n");
+    //ADDR_INTCLR0  = 0x00FC, INTCLR0[4](AF_LOCK_CLR=0x1)
     rc = isx006_i2c_read_parallel(saddr, 0x00FC, &v_read, BYTE_LEN);
     if (rc < 0) {
         pr_err("isx006_check_AF: saddr(0x%x): Read REG(0x%x) failed !\n",saddr, 0x00FC);
         goto error;
     }
-    v_temp = v_read | 0x10;
-    
+   
+    v_temp = v_read | 0x10;    
     rc = isx006_i2c_write_parallel(saddr, 0x00FC, v_temp, BYTE_LEN);
     if (rc < 0) {
         pr_err("isx006_check_AF: saddr(0x%x): Write REG(0x%x) failed !\n",saddr, 0x00FC);
         goto error;
     }
-    cam_msleep(10);    
 
-    
-    for (i = 0; i < ISX006_AF_RETRY_COUNT; i++)
+    /* 03.Polling the interrupt register until the data is 0 ----------------------------------------*/
+
+    rc = isx006_i2c_read_parallel(saddr, 0x00F8, &irq_status, BYTE_LEN);
+    if (rc < 0)
     {
-        //2.Check interrupt status is cleaned
-        rc = isx006_i2c_read_parallel(saddr, 0x00F8, &irq_status, BYTE_LEN);
-        if (rc < 0)
-        {
-            pr_err("isx006_check_AF: saddr(0x%x): Read REG(0x%x) failed !\n",saddr, 0x00F8);
-            goto error;
-        }
-        else
-        {
-            // Check MO_CHANGED STS (bit5)
-            if (!(irq_status & 0x10))
-            {
-                // [bit5] == 0
-                printk("isx006_check_AF: saddr(0x%x): CM_CHANGED STS is clear. \n",saddr);
-                break;
-            }
-        }
+        pr_err("isx006_check_AF: saddr(0x%x): Read REG(0x%x) failed !\n",saddr, 0x00F8);
+        goto error;
+    }
+
+    printk("isx006_check_AF: Read REG(0x%x) = 0x%x !\n", 0x00F8, irq_status);
+    if (!(irq_status & 0x10))//INTSTS0[4](AF_LOCK_STS)=0x0
+    {
+        printk("isx006_check_AF: saddr(0x%x): INTSTS0[4](AF_LOCK_STS) is clear. \n",saddr);
+        return 0;
+    }
+    else
+    {
+        pr_err("isx006_check_AF: clear interrupt status fail--- retry time = %d !\n", i);
         cam_msleep(10);
-        printk("isx006_check_AF: clear interrupt status --- retry time = %d !\n", i);
+        return -EIO; 
     }
 
     if (i >= ISX006_AF_RETRY_COUNT)
@@ -715,34 +711,56 @@ static int isx006_check_AF(unsigned short saddr, const char *tag)
         pr_err("isx006_check_AF: Interrupt status is not cleaned !\n");
         goto error;
     }
-
-    rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6D77, &AF_result, BYTE_LEN);
-    if (rc < 0) {
-        pr_err("isx006_check_AF: isx006_i2c_read_parallel(0x6D77) failed !\n");
-        return rc;
-    }
-
-    if(AF_result == AF_OK){
-        printk("isx006_check_AF: AF result is AF OK!!!!\n");
-    }
-    else if(AF_result == AF_NG){    
-        printk("isx006_check_AF: AF result is AF NG\n");
-        rc = -EIO;
-    }
-    else if(AF_result == AF_During){    
-        printk("isx006_check_AF: AF result is during AF\n");
-        rc = -EIO;
-    }
-    printk("isx006_check_AF: Success \n");
+    
     return rc;
 
 error:
-    printk("isx006_check_AF: Failed !\n");
     return rc;
 }
 /* FIH-SW3-MM-UW-check AF lock state-00-*/
 /*MM-UW-add auto flash 00-*/
 /* FIH-SW3-MM-UW-performance tuning-00-*/
+/* FIH-SW3-MM-UW-fix night capture fail-00-*/
+
+static int isx006_get_AF_state(unsigned short saddr, const char *tag)
+{
+        int rc = 0;
+        uint16_t v_read = 0x0;    
+        uint16_t v_temp = 0x0;        
+        uint16_t AF_result = 0xFF;
+        printk("isx006_get_AF_state: enter\n");
+
+
+        /* 01.Check the AF result register -------------------------------------------------------*/
+        rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6D77, &AF_result, BYTE_LEN);//ADD_AF_RESULT = 0x6D77
+        if (rc < 0) {
+            pr_err("isx006_check_AF: isx006_i2c_read_parallel(0x0004) failed !\n");
+            goto error;
+        }
+    
+        if(AF_result == AF_OK){
+            printk("isx006_check_AF: AF result is AF OK!!!!\n");
+        }
+        else if(AF_result == AF_NG){    
+            printk("isx006_check_AF: AF result is AF NG\n");
+            /*rc = isx006_i2c_read_parallel(saddr, 0x4885, &v_read, BYTE_LEN);
+            v_temp = v_read | 0x01;    
+            rc = isx006_i2c_write_parallel(saddr, 0x4885, v_temp, BYTE_LEN);*/
+            rc =  -EIO;;
+        }
+        else if(AF_result == AF_During){    
+            rc = isx006_i2c_read_parallel(saddr, 0x4885, &v_read, BYTE_LEN);
+            v_temp = v_read | 0x01;    
+            rc = isx006_i2c_write_parallel(saddr, 0x4885, v_temp, BYTE_LEN);
+            printk("isx006_check_AF: AF result is during AF\n");
+            rc = -EIO;;
+        }
+        return rc;
+    
+    error:
+        return rc;
+}
+/* FIH-SW3-MM-UW-cancel AF-00-*/
 
 /*MM-UW-reduce knocking noise-00+*/
 static int isx006_MF_position(unsigned short saddr, int position)
@@ -833,32 +851,19 @@ static uint32_t isx006_get_pict_max_exp_lc(void)
         return snap_frame_length_lines;
 }
 
+/*MM-UW-fix standby unstable-00+*/
 /*MM-UW-improve camera close performance-00+*/
 //FIH-SW-MM-MC-EnableHWStandby-00*{
 int isx006_enter_standby(void)
 {
-    int rc = 0;
-    int i = 0;
-    uint16_t irq_status = 0x0;    
+    int rc = 0; 
 
     /* Set NSTANDBY from L to H */
     rc = fih_set_gpio_output_value(isx006_info->sensor_pwd, "CAM_5M_STBYN", LOW);
     if (rc < 0)
         goto error;
     
-    //cam_msleep(150);//T1 duration(max)
-    cam_msleep(10);
-    for (i = 0; i < 20; i++)
-    {
-        rc = isx006_i2c_read_parallel(isx006_client->addr, 0x4685, &irq_status, BYTE_LEN);
-        if (rc < 0) {
-            pr_err("isx006_enter_standby: need more time to enter standby mode !\n");
-        }
-        else{
-            break;
-        }
-        cam_msleep(10);
-    }
+    cam_msleep(136);//T1 duration(max)
 
     /*MM-UW-Standby with MCLK off-00+*/
     rc = fih_disable_mclk(isx006_info->mclk, ISX006_MASTER_CLK_RATE);
@@ -875,12 +880,12 @@ error:
     printk("isx006_enter_standby: Failed !\n");
     return rc;
 }
+/*MM-UW-fix standby unstable-00-*/
 
+/*MM-UW-fix standby unstable-00+*/
 int isx006_exit_standby(void)
 {
     int rc = 0;
-    int i = 0;
-    uint16_t irq_status = 0x0;    
 
     /*MM-UW-Standby with MCLK off-00+*/
     rc = fih_enable_mclk(isx006_info->mclk, ISX006_MASTER_CLK_RATE);
@@ -895,18 +900,7 @@ int isx006_exit_standby(void)
     if (rc < 0)
         goto error;
 
-    cam_msleep(10);
-    for (i = 0; i < 20; i++)
-    {
-        rc = isx006_i2c_read_parallel(isx006_client->addr, 0x4685, &irq_status, BYTE_LEN);
-        if (rc < 0) {
-            pr_err("isx006_exit_standby: need more time to exit standby mode !\n");
-        }
-        else{
-            break;
-        }
-        cam_msleep(10);
-    }
+    cam_msleep(20);
     
     printk("isx006_exit_standby: Success.\n");   
     return rc;
@@ -917,43 +911,42 @@ error:
 }
 //FIH-SW-MM-MC-EnableHWStandby-00*}
 /*MM-UW-improve camera close performance-00-*/
+/*MM-UW-fix standby unstable-00-*/
 
+/*MM-UW-improve camera performance-00+*/
 /*MM-UW-EnableHWStandby-00+*/
 int front_cam_enter_standby(void)
 {
     int rc = 0;
-    int i = 0;
+    //int i = 0;
     uint16_t read_value;
 
+    printk("front_cam_enter_standby: Enter \n");
     rc = isx006_i2c_read(0x3D, 0x0018, &read_value, WORD_LEN);
     if (rc < 0)
         goto error;
-
-    printk ("mt9v115_enter_standby: 0x0018 = %x ++0\n", read_value);    
+ 
     read_value = read_value | 0x0001;
-    printk ("mt9v115_enter_standby: 0x0018 = %x ++1\n", read_value);  
-
-    
     rc = isx006_i2c_write(0x3D, 0x0018, read_value, WORD_LEN);
     if (rc < 0)
         goto error;
 
-    for (i = 0; i < 100; i++)
+    /*for (i = 0; i < 100; i++)
     {
         rc = isx006_i2c_read(0x3D, 0x0018, &read_value, WORD_LEN);
         if (rc < 0) {
-            pr_err("mt9v115_enter_standby: Read REG(0x%x) failed !\n", 0x0018);
+            pr_err("front_cam_enter_standby: Read REG(0x%x) failed !\n", 0x0018);
             goto error;
         }
-
         read_value = read_value >> 14;
         read_value = read_value & 0x0001;
-        printk("mt9v115_enter_standby: polling standy mode i = %d\n", i);
+        printk("front_cam_enter_standby: polling standy mode i = %d\n", i);
         if(read_value == 0x0001)
             break;
         
-        cam_msleep(20);
-    }
+        cam_msleep(10);
+    }*/
+    cam_msleep(35);
     
     printk("front_cam_enter_standby: Success \n");
     return 0;
@@ -964,6 +957,7 @@ error:
 
 }
 /*MM-UW-EnableHWStandby-00-*/
+/*MM-UW-improve camera performance-00-*/
 
 int isx006_polling_state_change(unsigned short saddr, enum isx006_device_status polling_status)
 {
@@ -1123,15 +1117,6 @@ int isx006_OTP_setting(void)
     isx006_i2c_write_parallel(slave_add, 0x4A06, NORMB, WORD_LEN);
     isx006_i2c_write_parallel(slave_add, 0x4A08, AWB_PRER, WORD_LEN);
     isx006_i2c_write_parallel(slave_add, 0x4A0A, AWB_PREB, WORD_LEN);
-    
-    /* Lens Shading ----------------------------------------------*/
-    Shading_index = (uint16_t) ((OTP_2_value >> 20 ) & 0x0000000F);        
-    printk("isx006_OTP_setting:Shading_index = %d\n", Shading_index);    
-
-    /*MM-UW-fix unbalance warning-00+*/   /* case SHD_TYP */
-    isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_SHD_TYP,
-           isx006_regs.reg_SHD_TYP_size);  
-    /*MM-UW-fix unbalance warning-00-*/
 
     return rc;    
 }
@@ -1282,6 +1267,7 @@ int isx006_AF_power(bool enable){
         rc = fih_regulator_enable(isx006_info->vreg_af_power, 3000000, "isx006_AF");
         if (rc < 0)
             goto error;
+        cam_msleep(15); 
     }
     else
     {
@@ -1292,6 +1278,7 @@ int isx006_AF_power(bool enable){
         rc = pmic_vreg_pull_down_switch(ON_CMD , PM_VREG_PDOWN_BT_ID);
         if (rc < 0)
             goto error;
+        cam_msleep(5); 
     }
     printk("isx006_AF_power(%d): Success.\n", enable);
     return rc;
@@ -1320,9 +1307,6 @@ int isx006_power_on(const struct msm_camera_sensor_info *data)
     {
         printk("isx006_power_on: STARTUP = 0 \n");     
 
-        /* <0>. initial PWPIN, NREST, NSTANDBY pin status */
-        /* Init power enable pins */
-
         /* I/O & Analog power up */    
         rc = fih_set_gpio_output_value(isx006_info->vreg_v1p2, "EN_VREG_CAM_VDD_V1P2", HIGH);
         if (rc < 0)
@@ -1343,7 +1327,7 @@ int isx006_power_on(const struct msm_camera_sensor_info *data)
         if (rc < 0)
             goto error;
 
-        cam_msleep(5);    
+        cam_msleep(10);    
 
         /*front camera enter standby*/
         /*MM-UW-EnableHWStandby-00+*/
@@ -1450,7 +1434,8 @@ int isx006_suspend(struct platform_device *pdev, pm_message_t state)
     }
     cam_msleep(5);
     /*MM-UW-Standby with MCLK off-00-*/
-    
+
+    bMainCameraIsReset = false;//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-01*
     STARTUP  = 0;
     AF_full_range = 0;
     
@@ -1873,6 +1858,9 @@ error:
 /* FIH-SW3-MM-UW-write OTP setting-00-*/
 /* FIH-SW3-MM-UW-set AF range-00-*/ 
 
+/* FIH-SW3-MM-UW-fix night capture fail-00+*/
+/* FIH-SW3-MM-UW-cancel AF-00+*/
+/*MM-UW-fix high AF power-00+*/
 /*MM-UW-fix auto flash fail in DP 00+*/
 //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00*{
 /*MM-UW-add auto flash 02+*/
@@ -1885,71 +1873,82 @@ static long isx006_set_AF(int af_mode)
     uint16_t read_value = 0;
     int32_t AE_value = 0;
     int32_t AE_target = 0x0000FD52 - 0x0000FFFF - 1;
+    LowLight = false;
 
-    printk("isx006_set_AF(%d): ----------E\n", af_mode);
+    if(af_mode != AF_MODE_POLLING)
+        printk("isx006_set_AF(%d): ----------E\n", af_mode);
+
+    /*get current environment AE value----------------------------------------------------*/
+    if (slave_add == isx006_client->addr)
+    {
+        rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0284, &read_value, WORD_LEN);   
+    }else{
+        rc = isx006_i2c_read(isx006_client->addr, 0x0284, &read_value, WORD_LEN);
+    }  
+    if(rc < 0) {
+        printk("isx006_set_AF: read AE value failed !\n");
+        goto error;
+    }
+
+    if( read_value >= 0x00008000 )
+        AE_value = (read_value - 0x0000FFFF -1);
+    else
+        AE_value = (read_value & 0x0000FFFF);
+
+    if(AE_value <= AE_target)
+    {
+        LowLight = true;
+        printk("isx006_set_AF: low light condition !\n");
+    }
+    /*--------------------------------------------------------------------------------*/
+
+    if(current_af_mode == AF_MODE_OFF && af_mode != AF_MODE_OFF)
+    {
+        isx006_AF_power(1);
+        cam_msleep(100);
+    }
 
     switch (af_mode) {
     case AF_MODE_NORMAL:
     case AF_MODE_AUTO:
         /*get current flash mode*/
         led_mode = msm_soc_get_led_mode();
-        printk("isx006_set_AF: led_mode = %d !\n", led_mode);
-
-        /*get current environment AE value*/
-        if (slave_add == isx006_client->addr)
-        {
-            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0284, &read_value, WORD_LEN);   
-        }else{
-            rc = isx006_i2c_read(isx006_client->addr, 0x0284, &read_value, WORD_LEN);
-        }  
-        if(rc < 0) {
-            printk("isx006_set_AF: read AE value failed !\n");
-            goto error;
-        }
-
-        if( read_value >= 0x00008000 )
-            AE_value = (read_value - 0x0000FFFF -1);
-        else
-            AE_value = (read_value & 0x0000FFFF);
+        printk("isx006_set_AF: led_mode = %d !\n", led_mode);  
 
         if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO)
         {  
-            if(AE_value <= AE_target)
+            if(LowLight)
             {
                 printk("isx006_set_AF: flash enable!\n");
                 rc = msm_soc_torch_trigger();
-                if (rc < 0) {
+                if (rc < 0) 
                     printk("isx006_set_AF: msm_soc_torch_trigger() failed !\n");
-                    goto error;
-                }
             }
-        }    
+        }  
         
         rc = isx006_set_monitor_af_mode(MONI_AF_SAF, "MONI_AF_SAF");
         if(rc < 0)
             goto error;
 
-        rc = isx006_check_AF(isx006_client->addr, "check AF status");
+        /*rc = isx006_check_AF(isx006_client->addr, "check AF status");
         if (rc < 0) {
             pr_err("isx006_set_AF: isx006_check_AF(check AF status) failed !\n");
-        }
+        }*/
         
         if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO)
         {  
-            if(AE_value <= AE_target)
+            if(LowLight)
             {
                 printk("isx006_set_AF: flash off!\n");
                 rc = msm_soc_torch_flash_off();
                 if (rc < 0)
-                {
                     printk("isx006_set_AF: msm_soc_torch_flash_off() failed !\n");
-                    goto error;
-                }
+
                 cam_msleep(50); 
             }
         }    
         break;
-        
+
     case AF_MODE_INFINITY:
     case AF_MODE_MACRO:
         rc = isx006_set_AF_Range(af_mode);        
@@ -1974,14 +1973,32 @@ static long isx006_set_AF(int af_mode)
 
     case AF_MODE_OFF:
         /*MM-UW-reduce knocking noise-00+*/
-        rc = isx006_set_monitor_af_mode(MONI_AF_MF, "MONI_AF_OFF");
+        rc = isx006_set_monitor_af_mode(MONI_AF_MF, "MONI_AF_MF");
         if(rc < 0)
             goto error;
         
         rc = isx006_MF_position(isx006_client->addr, AF_A_value);
         if (rc < 0)
-            printk ("isx006_sensor_release: isx006_check_MF fail.\n"); 
+            printk ("isx006_sensor_release: isx006_check_MF fail.\n");
+        
+		rc = isx006_set_monitor_af_mode(MONI_AF_OFF, "MONI_AF_OFF");
+        if(rc < 0)
+            goto error;
+        isx006_AF_power(0); 
         /*MM-UW-reduce knocking noise-00-*/
+        break;
+
+    case AF_MODE_POLLING:
+        rc = isx006_check_AF(isx006_client->addr, "check AF polling status");
+        if(rc < 0)
+            goto error;
+        break;
+
+    case AF_MODE_GET_STATE:
+        rc = isx006_get_AF_state(isx006_client->addr, "check AF result");
+        if(rc < 0)
+            goto error;
+   
         break;
 
     default:
@@ -1989,8 +2006,10 @@ static long isx006_set_AF(int af_mode)
         printk("isx006_set_AF: ERR: Mode = %d, This is invalid !\n", af_mode);
         break;
     }
+    current_af_mode = af_mode;
 
     printk("isx006_set_AF: ----------X \n");
+    
 error:
     return rc;
 }
@@ -1999,9 +2018,12 @@ error:
 /*MM-UW-add auto flash 02-*/
 //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00*}
 /*MM-UW-fix auto flash fail in DP 00-*/
+/*MM-UW-fix high AF power-00-*/
 
 /* FIH-SW3-MM-UW-add reduce_red_eye-00-*/
 /*MM-UW-add auto flash 00-*/
+/* FIH-SW3-MM-UW-cancel AF-00-*/
+/* FIH-SW3-MM-UW-fix night capture fail-00-*/
 
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-00*{ */
 /* FIH-SW3-MM-URI-Set FPS-00+ */
@@ -2228,21 +2250,22 @@ static long isx006_set_AE_meter(int meter)
 #endif
 /*MM-UW-set metering 00-*/
 
+/* FIH-SW3-MM-UW-fix night capture fail-00+*/
+/* FIH-SW3-MM-UW-fix focus ramge-00+*/
 /* FIH-SW3-MM-UW-set AF range-00+*/ 
 #ifdef CONFIG_FIH_SCENE
 static long isx006_set_scene(int scene) 
 {
     long rc = 0;
-    
+
+    isx006_scene = scene;
+
     switch (scene) {
     case SCENE_AUTO:
         printk ("isx006_set_scene: SCENE_AUTO\n");
-        if(isx006_scene != SCENE_AUTO)
-        {
-            rc = isx006_set_AF_Range(AF_MODE_AUTO);
-            if(rc < 0)
-                goto error;
-        }
+        rc = isx006_set_AF_Range(AF_MODE_AUTO);
+        if(rc < 0)
+            goto error;
 
         rc = isx006_i2c_write_table_parallel(isx006_client->addr, isx006_regs.reg_auto_scene,
                            isx006_regs.reg_auto_scene_size);
@@ -2262,12 +2285,12 @@ static long isx006_set_scene(int scene)
                            isx006_regs.reg_auto_scene_size);
         if(rc < 0)
             goto error;
-        
+
         break;
         
     case SCENE_NIGHT:
         printk ("isx006_set_scene: SCENE_NIGHT\n");
-        rc = isx006_set_AF_Range(AF_MODE_AUTO);
+        rc = isx006_set_AF_Range(AF_MODE_INFINITY);
         if(rc < 0)
             goto error;
 
@@ -2293,10 +2316,10 @@ static long isx006_set_scene(int scene)
         
     //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00+{
     case SCENE_LANDSCAPE:
+        printk ("isx006_set_scene: SCENE_LANDSCAPE\n");
         rc = isx006_set_AF_Range(AF_MODE_INFINITY);
         if(rc < 0)
             goto error;
-        printk ("isx006_set_scene: SCENE_LANDSCAPE\n");
         rc = isx006_i2c_write_table_parallel(isx006_client->addr, isx006_regs.reg_landscape,
                            isx006_regs.reg_landscape_size);
         if(rc < 0)
@@ -2322,7 +2345,6 @@ static long isx006_set_scene(int scene)
         printk ("isx006_set_scene: wrong value setting\n");
         return -EINVAL;
     }
-    isx006_scene = scene;
     return rc;
 
 error:
@@ -2333,6 +2355,8 @@ error:
 /* FIH-SW3-MM-UW-set AF range-00-*/ 
 /* FIH-SW3-MM-URI-Add WB-00- */
 /* FIH-SW3-MM-SL-PatchForCameraFeature-01*} */
+/* FIH-SW3-MM-UW-fix focus ramge-00-*/
+/* FIH-SW3-MM-UW-fix night capture fail-00-*/
 
 static int32_t isx006_write_exp_gain(uint16_t gain, uint32_t line)
 {
@@ -2429,6 +2453,7 @@ error:
 /* FIH-SW3-MM-UW-set AF range-00-*/ 
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+}
 
+/* FIH-SW3-MM-UW-fix night capture fail-00+*/
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00*{
 static int32_t isx006_sensor_setting(int update_type, int rt)
 {
@@ -2442,7 +2467,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
         {
             printk("isx006_sensor_setting: case REG_INIT \n");
             CameraMode = 0;/*MM-UW-support AF 01+*/
-            CSI_CONFIG = 0;
+            CSI_CONFIG = false;
 
             bRegInitDone = false;
             reg_init_thread = kthread_create(isx006_reg_init_task, NULL, "isx006_thread");
@@ -2457,7 +2482,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
         
     case UPDATE_PERIODIC:
 
-       if ((rt == RES_PREVIEW) && (CSI_CONFIG == 1)) 
+       if ((rt == RES_PREVIEW) && (CSI_CONFIG == true)) 
         {
             printk("isx006_sensor_setting: case UPDATE_PERIODIC <RES_PREVIEW + CSI(1)>\n");
             /* Change mode from Capture to monitor----------------------------*/
@@ -2475,7 +2500,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
 
         }
         
-        if ((rt == RES_PREVIEW) && (CSI_CONFIG == 0)) 
+        if ((rt == RES_PREVIEW) && (CSI_CONFIG == false)) 
         {
             printk("isx006_sensor_setting: case UPDATE_PERIODIC <RES_PREVIEW + CSI(0)>\n");
 
@@ -2484,7 +2509,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
 
             //cam_msleep(50);//Waitting for streaming stop.
 
-            if (CSI_CONFIG == 0) {
+            if (CSI_CONFIG == false) {
                 printk("isx006_sensor_setting: CSI_CONFIG  = 0, Pre CSI config.\n");
                 msm_camio_vfe_clk_rate_set(192000000);
                 isx006_csi_params.lane_cnt = 2;
@@ -2495,7 +2520,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
                 rc = msm_camio_csi_config(&isx006_csi_params);
 
                 cam_msleep(50);//cam_msleep(200)//Waitting for csi config done.
-                CSI_CONFIG = 1;
+                CSI_CONFIG = true;
             }
 
             /* Sensor start streaming */
@@ -2509,6 +2534,10 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
         if (rt == RES_CAPTURE)
         {
             printk("isx006_sensor_setting: case UPDATE_PERIODIC <RES_CAPTURE>\n");
+
+            if(isx006_scene == SCENE_NIGHT)
+                cam_msleep(333);  
+            
             /* Change mode from Monitor to capture*/
             rc = isx006_set_camera_mode(CAPTURE_MODE, "CAPTURE_MODE");
             if (rc < 0) {
@@ -2534,6 +2563,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
 }
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00*}
 /* FIH-SW3-MM-UW-performance tuning-00-*/
+/* FIH-SW3-MM-UW-fix night capture fail-00-*/
 
 static int32_t isx006_video_config(int mode)
 {
@@ -2713,9 +2743,18 @@ static int32_t isx006_set_sensor_mode(int mode,
         printk("isx006_set_sensor_mode: SENSOR_RESET_MODE---------------E\n");
         //01. Re-set flag variables.
         STARTUP = 0;
-        CSI_CONFIG = 0;
+        //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+{
+        bMainCameraIsReset = true;//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-01*
 
-        //02. Power off.
+        //02. Re-config front camera pin.
+        rc = fih_set_gpio_output_value(isx006_info->sensor_f_pwd, "CAM_VGA_STBY" , LOW);//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+
+        if (rc < 0) {
+            printk("isx006_set_sensor_mode: Re-config front camera CAM_VGA_STBY pin for reset failed !\n");
+            return rc;
+        }        
+        //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
+
+        //03. Power off.
         rc = isx006_power_off();
         if (rc < 0) {
             printk("isx006_set_sensor_mode: isx006_power_off for reset failed !\n");
@@ -2723,21 +2762,21 @@ static int32_t isx006_set_sensor_mode(int mode,
         }
         cam_msleep(50);//Wait power off done.
 
-        //03. Power on.
+        //04. Power on.
         rc = isx006_power_on(isx006_info);
         if (rc < 0) {
             printk("isx006_set_sensor_mode: isx006_power_on for reset failed !\n");
             return rc;
         }
 
-        //04. Create thread for init reg.
+        //05. Create thread for init reg.
         rc = isx006_sensor_setting(REG_INIT, RES_PREVIEW);
         if (rc < 0) {
             printk("isx006_set_sensor_mode: Create task thread for reset failed !\n");
             return rc;
         }
 
-        //05. Config CSI and wake up task thread.
+        //06. Config CSI and wake up task thread.
         rc = isx006_sensor_setting(UPDATE_PERIODIC, RES_PREVIEW);
         if (rc < 0) {
             printk("isx006_set_sensor_mode: Config CSI and wake up task thread for reset failed !\n");
@@ -2884,24 +2923,48 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
     snap_frame_length_lines = 2592;
     snap_line_length_pck = 1944;
 
+    //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-01*{
+    // Check front camera state before power on main camera.
+    if (bFrontCameraIsReset == true)
+    {
+        printk("isx006_sensor_open_init: Re-Set for FRONT_SENSOR_RESET\n");
+        STARTUP = 0;
+        bFrontCameraIsReset = false;
+    }
+    //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-01*}
+
     /* Power on and enable mclk */
     rc = isx006_power_on(data);
     if (rc < 0) {
         printk("isx006_sensor_open_init: isx006_power_on() failed !\n");
         goto init_fail;
     }
-    
+
+    //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+{
     //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-02+{
     //Read chip ID to check that I2C bus is normal.
-    rc = isx006_i2c_read_parallel(slave_add, ISX006_CID_REG, &chipid, WORD_LEN);
+    if (STARTUP == 0)
+        rc = isx006_i2c_read_parallel(slave_add, ISX006_CID_REG, &chipid, WORD_LEN);
+    else
+        rc = isx006_i2c_read_parallel(isx006_client->addr, ISX006_CID_REG, &chipid, WORD_LEN);
+    //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
     if (rc < 0)
     {
         printk ("isx006_sensor_open_init: I2C bus is abnormal. SENSOR_RESET_MODE ----> E\n");
         //01. Re-set flag variables.
         STARTUP = 0;
-        CSI_CONFIG = 0;
+        //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+{
+        bMainCameraIsReset = true;//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-01*
 
-        //02. Power off.
+        //02 Re-config front camera pin.
+        rc = fih_set_gpio_output_value(isx006_info->sensor_f_pwd, "CAM_VGA_STBY" , LOW);
+        if (rc < 0) {
+            printk("isx006_sensor_open_init: Re-config front camera CAM_VGA_STBY pin for reset failed !\n");
+            return rc;
+        }  
+        //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
+
+        //03. Power off.
         rc = isx006_power_off();
         if (rc < 0) {
             printk("isx006_sensor_open_init: isx006_power_off for reset failed !\n");
@@ -2909,7 +2972,7 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
         }
         cam_msleep(50);//Wait power off done.
 
-        //03. Power on.
+        //04. Power on.
         rc = isx006_power_on(isx006_info);
         if (rc < 0) {
             printk("isx006_sensor_open_init: isx006_power_on for reset failed !\n");
@@ -3017,8 +3080,9 @@ int isx006_sensor_config(void __user *argp)
                 sizeof(struct sensor_cfg_data)))
         return -EFAULT;
     mutex_lock(&isx006_mut);
-    
-    printk("isx006_sensor_config: cfgtype = %d\n", cdata.cfgtype);
+
+    if(cdata.cfgtype != CFG_SET_AUTO_FOCUS)
+        printk("isx006_sensor_config: cfgtype = %d\n", cdata.cfgtype);
 
     //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+{
     /* Waitting REG init thread finish init task */
@@ -3236,7 +3300,7 @@ static int isx006_sensor_release(void)
  
     kfree(isx006_ctrl);
     isx006_ctrl = NULL;
-    CSI_CONFIG = 0;
+    CSI_CONFIG = false;
  
     printk("isx006_sensor_release: Completed.\n");
     mutex_unlock(&isx006_mut);

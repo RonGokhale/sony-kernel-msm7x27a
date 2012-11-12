@@ -23,6 +23,7 @@
 				 Sleep-Mode Protocol from the Host side
    2006-Sep-08  Motorola         Added workqueue for handling sleep work.
    2007-Jan-24  Motorola         Added mbm_handle_ioi() call to ISR.
+ * Copyright (C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.   
 
 */
 

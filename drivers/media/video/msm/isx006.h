@@ -57,6 +57,7 @@ enum isx006_moni_af_mode {
     MONI_AF_UNKNOWN  = 4
 };
 
+/* FIH-SW3-MM-UW-cancel AF-00+*/
 //Need sync enum isp3a_af_mode_t in camera.h
 enum isx006_af_mode{
   AF_MODE_UNCHANGED = -1,
@@ -66,8 +67,11 @@ enum isx006_af_mode{
   AF_MODE_CAF,           //Full (scan from close to infinity
   AF_MODE_INFINITY,      //Infinity (scan from far to infinity)
   AF_MODE_OFF,           //Fixed infinity (the focus is set to infinity and no scan)
+  AF_MODE_POLLING, 
+  AF_MODE_GET_STATE, 
   AF_MODE_MAX
 };
+/* FIH-SW3-MM-UW-cancel AF-00-*/
 //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00+}
 
 /*MM-UW-support AF+++*/

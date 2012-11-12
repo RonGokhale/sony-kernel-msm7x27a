@@ -35,6 +35,7 @@ config ARCH_MSM7X27
 	select CLEANCACHE
 	select QCACHE
 	select MSM_PM2 if PM
+	select DONT_MAP_HOLE_AFTER_MEMBANK0
 
 config ARCH_MSM7X30
 	bool "MSM7x30"

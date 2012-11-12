@@ -447,12 +447,22 @@ if FIH_CONFIG_GROUP
         
         # FIH-SW3-PERIPHERAL-AH-Touch_Porting-00
         if FIH_TOUCHSCREEN
-        config FIH_TOUCHSCREEN_CYTTSP_I2C_TMA340
+        menuconfig FIH_TOUCHSCREEN_CYTTSP_I2C_TMA340
             bool "Cypress TTSP based touchscreens TMA340"
             depends on I2C && FIH_TOUCHSCREEN
             default y
             help
                 Select if the Cypress TMA340 touch panel is attached.
+		
+		if FIH_TOUCHSCREEN_CYTTSP_I2C_TMA340
+        config FIH_TOUCHSCREEN_CYTTSP_I2C_TMA340_ESD
+            bool "Cypress TMA340 Touchscreen ESD workaround"
+            depends on I2C && FIH_TOUCHSCREEN_CYTTSP_I2C_TMA340
+            default y
+            help
+                Select if the Cypress TMA340 Touchscreen ESD workaround needed.
+
+		endif
         endif
 
 

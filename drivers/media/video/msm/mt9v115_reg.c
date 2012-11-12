@@ -411,6 +411,7 @@ struct fih_i2c_reg_conf mt9v115_sub_init_settings_array[] = {
 //FIH-SW-MM-MC-OptimizeCameraForLaunchTime-00+}
 /* MTD-SW-MM-SL-FinuTuneFrontCamera-00*} */
 
+/*MM-UW-improve camera performance-00+*/
 struct fih_i2c_reg_conf mt9v115_stream_start_array[] = {
     { 0x8400, 0x02, BYTE_LEN, 0 },
     { 0x8401, 0x02, BYTE_POLL, 0 }//State polling (start streaming)
@@ -420,6 +421,7 @@ struct fih_i2c_reg_conf mt9v115_stream_stop_array[] = {
     { 0x8400, 0x01, BYTE_LEN, 0 },
     { 0x8401, 0x01, BYTE_POLL, 0 }//State polling (1: stop streaming)
 };
+/*MM-UW-improve camera performance-00-*/
 
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-01+{ */	
 struct fih_i2c_reg_conf mt9v115_fps_30_settings_array [] = {

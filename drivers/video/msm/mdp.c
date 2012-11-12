@@ -58,7 +58,9 @@ struct completion mdp_ppp_comp;
 struct semaphore mdp_ppp_mutex;
 struct semaphore mdp_pipe_ctrl_mutex;
 
-unsigned long mdp_timer_duration = (HZ/20);   /* 50 msecond */
+/* FIH-SW-MM-VH-DISPLAY-34.1*[ */
+unsigned long mdp_timer_duration = (HZ/3);   /* ~333 msecond */
+/* FIH-SW-MM-VH-DISPLAY-34.1*] */
 
 boolean mdp_ppp_waiting = FALSE;
 uint32 mdp_tv_underflow_cnt;
@@ -1410,9 +1412,14 @@ void mdp_pipe_ctrl(MDP_BLOCK_TYPE block, MDP_BLOCK_POWER_STATE state,
 	 * power to ON
 	 */
 	WARN_ON(isr == TRUE && state == MDP_BLOCK_POWER_ON);
-
+	
+/* FIH-SW-MM-VH-DISPLAY-34.1*[ */
 	spin_lock_irqsave(&mdp_spin_lock, flag);
 	if (MDP_BLOCK_POWER_ON == state) {
+		if (atomic_read(&mdp_block_power_cnt[block]) < 0)
+		{
+			printk("[DISPLAY] ERROR: mdp_block_power_cnt[%d]=%d\r\n", block, atomic_read(&mdp_block_power_cnt[block]));
+		}
 		atomic_inc(&mdp_block_power_cnt[block]);
 
 		if (MDP_DMA2_BLOCK == block)
@@ -1430,11 +1437,12 @@ void mdp_pipe_ctrl(MDP_BLOCK_TYPE block, MDP_BLOCK_POWER_STATE state,
 			* other blocks
 			*/
 			if (block != MDP_MASTER_BLOCK) {
-				MSM_FB_INFO("mdp_block_power_cnt[block=%d] \
+				printk("[DISPLAY] ERROR: mdp_block_power_cnt[block=%d] \
 				multiple power-off request\n", block);
 			}
 			atomic_set(&mdp_block_power_cnt[block], 0);
 		}
+/* FIH-SW-MM-VH-DISPLAY-34.1*] */
 
 		if (MDP_DMA2_BLOCK == block)
 			mdp_in_processing = FALSE;
