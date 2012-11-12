@@ -16,6 +16,7 @@
 
    Copyright (C) 2006-2007 - Motorola
    Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+   Copyright (C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
 
    Date         Author           Comment
    -----------  --------------   --------------------------------
@@ -23,7 +24,6 @@
 				 Sleep-Mode Protocol from the Host side
    2006-Sep-08  Motorola         Added workqueue for handling sleep work.
    2007-Jan-24  Motorola         Added mbm_handle_ioi() call to ISR.
- * Copyright (C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.   
 
 */
 

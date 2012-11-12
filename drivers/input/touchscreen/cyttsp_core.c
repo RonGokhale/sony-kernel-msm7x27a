@@ -2627,7 +2627,7 @@ static ssize_t attr_ESD_WORKAROUND(struct device *dev,
 		goto ESD_suspend_fail;
 	}
 	DBG_INFO(KERN_INFO"%s: val=%d\n", __func__,val);
-	LOCK(ts->mutex);
+	mutex_lock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	if(val == CY_FACE_DOWN && ESD==false)
 	{
 		ESD=true;
@@ -2749,10 +2749,10 @@ static ssize_t attr_ESD_WORKAROUND(struct device *dev,
 			DBG_MSG(KERN_INFO"%s: DISABLE ESD bit is already set...\n", __func__);
 	}
 	else DBG_MSG(KERN_INFO"%s: Error ESD write,status=%d.\n", __func__,val);
-	UNLOCK(ts->mutex);
+	mutex_unlock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	return size;
 ESDa_fail:
-	UNLOCK(ts->mutex);
+	mutex_unlock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 ESD_suspend_fail:
 	return  -EINVAL;
 }
@@ -2768,23 +2768,24 @@ static ssize_t attr_ESD_show(struct device *dev,
 
 	DBG_MSG(KERN_INFO"%s: Enter\n", __func__);
 	if (ts->suspended)
-		goto get_ESD_fail;
+		goto get_ESD_suspend;/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	
-	LOCK(ts->mutex);
+	mutex_lock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	retval = cyttsp_rd_reg(ts, cmd, &data);
 	if (retval < 0) {
 		DBG_ERR("%s: Failed resd block data, err:%d\n",
 			__func__, retval);
 		goto get_ESD_fail;
 	}
-	UNLOCK(ts->mutex);
+	mutex_unlock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	if(data)
 		count += snprintf(buf,sizeof("ESD status is 12!\n"), "ESD status is %x!\n",data);
 
 	return count;
 
 get_ESD_fail:
-	UNLOCK(ts->mutex);
+	mutex_unlock(&ts->mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
+get_ESD_suspend:
 	DBG_ERR("%s: Failed get ESD, err:%d\n",
 			__func__, retval);
 	return count;
@@ -2806,7 +2807,7 @@ int TOUCH_ESD_WORKAROUND(int enable)
 		return -1;
 
 	
-	LOCK(g_ts.mutex);
+	mutex_lock(&g_ts.mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	if(enable == CY_FACE_DOWN && ESD==false /*&& g_ts!=NULL*/)
 	{
 		ESD=true;
@@ -2931,8 +2932,8 @@ int TOUCH_ESD_WORKAROUND(int enable)
 		ret=0;
 	}
 	else DBG_MSG(KERN_INFO"%s: Error ESD write,status=%d.\n", __func__,enable);
-	UNLOCK(g_ts.mutex);
 ESD_fail:
+	mutex_unlock(&g_ts.mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	return ret;
 }
 EXPORT_SYMBOL(TOUCH_ESD_WORKAROUND);	

@@ -92,6 +92,7 @@ static bool CSI_CONFIG = false;
 static bool STARTUP = false;//FIH-SW-MM-MC-EnableHWStandby-00*
 static bool bSubInitDone = false;//FIH-SW-MM-MC-OptimizeCameraForLaunchTime-00+
 static struct mt9v115_ctrl_t *mt9v115_ctrl;
+struct platform_device *pdev_mt9v115 = NULL;//Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+
 
 
 static DECLARE_WAIT_QUEUE_HEAD(mt9v115_wait_queue);
@@ -339,13 +340,13 @@ static int32_t mt9v115_i2c_write_table(
 
     for (i = 0; i < num_of_items_in_table; i++) {
 
-        if (reg_conf_tbl->waddr == 0x001A && reg_conf_tbl->wdata == 0x0126)
+        if (reg_conf_tbl->waddr == 0x001A && reg_conf_tbl->wdata == 0x0106)//Div2-SW6-MM-MC-PortingMt9v115NewSetting_0701-00*
         {
             fih_i2c_no_ack_write(mt9v115_client,
             reg_conf_tbl->waddr, reg_conf_tbl->wdata,
             reg_conf_tbl->width);
             rc = 0x1;
-            printk("ByPass: Write Reg_0x001A to 0x0126, no return ACK !\n");
+            printk("ByPass: Write Reg_0x001A to 0x0106, no return ACK !\n");
         }
         else
         {
@@ -534,8 +535,8 @@ static int32_t mt9v115_sensor_setting(int update_type, int rt)
             if (bFrontCameraIsReset == false)
             {
                 /* stop streaming */
-                //rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_stop_tbl[0], mt9v115_regs.reg_stop_tbl_size);
-                rc = fih_i2c_write(mt9v115_client, 0x8400, 0x01, BYTE_LEN);
+                rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_stop_tbl[0], mt9v115_regs.reg_stop_tbl_size);//Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00*
+                //rc = fih_i2c_write(mt9v115_client, 0x8400, 0x01, BYTE_LEN);
                 if (rc < 0)
                 {
                     printk("mt9v115_sensor_setting: Stop streaming failed !\n");
@@ -565,8 +566,8 @@ static int32_t mt9v115_sensor_setting(int update_type, int rt)
             if (bSubInitDone == true)
             {
                 /* Sensor start streaming */
-                //rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_start_tbl[0], mt9v115_regs.reg_start_tbl_size);
-                rc = fih_i2c_write(mt9v115_client, 0x8400, 0x02, BYTE_LEN);//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00*
+                rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_start_tbl[0], mt9v115_regs.reg_start_tbl_size);//Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00*
+                //rc = fih_i2c_write(mt9v115_client, 0x8400, 0x02, BYTE_LEN);
                 if (rc < 0)
                 {
                     printk("mt9v115_sensor_setting: Sensor start streaming failed !\n");
@@ -693,13 +694,24 @@ static int32_t mt9v115_set_sensor_mode(int mode,
         }   
         cam_msleep(5);// >0
 
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+{
+        if (pdev_mt9v115 != NULL)
+        {
+            msm_camio_disable(pdev_mt9v115);
+            cam_msleep(20);//Wait camio disable done.
+            printk("mt9v115_set_sensor_mode: msm_camio_disable() \n");
+        }
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+}
+
         //03. Power off.
         rc = mt9v115_power_off();
         if (rc < 0) {
             printk("mt9v115_set_sensor_mode: mt9v115_power_off for reset failed !\n");
             return rc;
         }
-        cam_msleep(50);//Wait power off done.
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00*{
+        cam_msleep(200);//Wait power off done.
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00*}
 
         //04. Power on.
         rc = mt9v115_power_on(mt9v115_info);
@@ -714,6 +726,15 @@ static int32_t mt9v115_set_sensor_mode(int mode,
             printk("mt9v115_set_sensor_mode: INIT main reg table for reset failed !\n");
             return rc;
         }
+
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+{
+        if (pdev_mt9v115 != NULL)
+        {
+            msm_camio_enable(pdev_mt9v115);
+            cam_msleep(20);//Wait camio enable done.
+            printk("mt9v115_set_sensor_mode: msm_camio_enable() \n");
+        }
+        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+}
 
         //06. Stop streaming and config CSI .
         rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_stop_tbl[0], mt9v115_regs.reg_stop_tbl_size);
@@ -991,8 +1012,8 @@ int mt9v115_sensor_config(void __user *argp)
         printk("mt9v115_sensor_config: mt9v115_i2c_write_table(reg_sub_init_tbl) success, bSubInitDone = %d .\n", bSubInitDone);
 
         /* Sensor start streaming */
-        //rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_start_tbl[0], mt9v115_regs.reg_start_tbl_size);
-        rc = fih_i2c_write(mt9v115_client, 0x8400, 0x02, BYTE_LEN);//FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00*
+        rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_start_tbl[0], mt9v115_regs.reg_start_tbl_size);//Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00*
+        //rc = fih_i2c_write(mt9v115_client, 0x8400, 0x02, BYTE_LEN);
         if (rc < 0)
         {
             printk("mt9v115_sensor_config: Sensor start streaming failed !\n");
@@ -1168,6 +1189,7 @@ probe_fail_1:
 static int __devinit mt9v115_probe(struct platform_device *pdev)
 {
     printk("mt9v115_probe: Register mt9v115 sensor to msm_camera_drv. \n");
+    pdev_mt9v115 = pdev;//Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+
     return msm_camera_drv_start(pdev, mt9v115_sensor_probe);
 }
 

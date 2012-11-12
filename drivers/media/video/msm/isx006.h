@@ -18,11 +18,10 @@
 #include "fih_cam_api.h"
 
 extern struct isx006_reg isx006_regs;
-
-//enum isx006_width {
-//	WORD_LEN,
-//	BYTE_LEN
-//};
+/* FIH-SW3-MM-UW-flash tuning-00+*/
+extern int16_t x_1_5[];
+extern int16_t x_2[];
+/* FIH-SW3-MM-UW-flash tuning-00-*/
 
 enum isx006_device_status {
 	STS_POWER_DOWN = 0,
@@ -82,6 +81,19 @@ enum isx006_AF_result {
 	AF_UNKNOWN      = 3
 };
 /*MM-UW-support AF---*/
+
+/* FIH-SW3-MM-UW-fix capture fail-00+*/
+enum isx006_AF_state {
+	AF_Load = 0,
+	AF_Init = 1,
+	AF_Init_HpMv = 2,
+	AF_Idle = 3,
+       AF_SAF_MvHome = 4,
+	AF_SAF_Idle = 5,
+	AF_SAF_MvNext = 6,
+	AF_SAF_Lock = 7,
+};
+/* FIH-SW3-MM-UW-fix capture fail-00-*/
 
 /* FIH-SW3-MM-UW-add reduce_red_eye-00+*/
 enum led_mode {

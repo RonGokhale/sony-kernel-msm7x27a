@@ -265,7 +265,7 @@ static void insert_headset(void)
                #endif
                /* MM-RC-HEADSET-MULTIBUTTON-DETECT]* */
 	        switch_set_state(&hi->sdev, UNKNOWN_DEVICE); /* FIH-SW2-MM-AY-hsed_type-02 */
-		} else if (voltage > 1000 || voltage < 400) { /* FIH-SW2-MM-AY-hsed_type-01 ] */
+		} else if (voltage > 700 || voltage < 400) { /* FIH-SW2-MM-AY-hsed_type-01 ] *//* SW-MM-RC-CTIA-TTY* */
 	        if (gpio_get_value(hi->cable_in1) == HS_PLUG_IN) {
        	        if (gpio_get_value(hi->cable_in2) == BTN_STATE_PRESSED) {
                     switch_set_state(&hi->sdev, NOMIC_HEADSET);

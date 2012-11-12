@@ -261,7 +261,7 @@ static int bma250_calibration_xyz(struct i2c_client *client, unsigned char XYZ)
     /* 9. Write 01(1g) or 10(-1g) in bits[6:5] of register 0x37 =>calibrate on z-axis */
     if (XYZ > 2)
     {
-        if (bma250->platform_data->layout < 4)
+        if (bma250->value.z > 0)
             data = 1 << 5;
         else
             data = 1 << 6;
@@ -332,18 +332,9 @@ static int bma250_calibration_store(struct i2c_client *client)
     return 0;
 }
 
-static int bma250_set_calibration(struct i2c_client *client)
+static int bma250_calibration(struct i2c_client *client)
 {
-    struct bma250_data *bma250 = i2c_get_clientdata(client);
     struct bma250cfg cfg_value;
-
-    if (client == NULL)
-    {
-        GSENSOR_DEBUG(LEVEL0, "NULL.");
-        return -EINVAL;
-    }
-    if (!bma250->enable)
-        return -EINVAL;
 
     /* 0. Write 0x00 in register 0x11 =>set default power mode */
     bma250_get_mode(client, &cfg_value.mode);
@@ -435,6 +426,22 @@ static void bma250_set_enable(struct i2c_client *client, bool Enable)
     mutex_unlock(&bma250->enable_mutex);
 
     GSENSOR_DEBUG(LEVEL0, "enable = %d", bma250->enable);
+}
+
+static void bma250_set_value(struct i2c_client *client, unsigned int Value)
+{
+    struct bma250_data *bma250 = i2c_get_clientdata(client);
+
+    if (client == NULL)
+    {
+        GSENSOR_DEBUG(LEVEL0, "NULL.");
+        return;
+    }
+    if (Value != 3112)	//cal
+        return;
+
+    if (bma250->enable)
+        bma250_calibration(client);
 }
 
 static ssize_t bma250_bandwidth_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -717,11 +724,7 @@ static ssize_t bma250_value_store(struct device *dev, struct device_attribute *a
         return count;
     }
 
-    if (data == 3112)	//cal
-    {
-        if (bma250_set_calibration(bma250->client) < 0)
-            GSENSOR_DEBUG(LEVEL0, "Failed.");
-    }
+    bma250_set_value(bma250->client, (unsigned int)data);
 
     GSENSOR_DEBUG(LEVEL1, "%ld", data);
     return count;
@@ -737,7 +740,7 @@ static DEVICE_ATTR(interrupt, 0660, bma250_interrupt_show, bma250_interrupt_stor
 static DEVICE_ATTR(mode, 0660, bma250_mode_show, bma250_mode_store);
 static DEVICE_ATTR(range, 0660, bma250_range_show, bma250_range_store);
 static DEVICE_ATTR(reg, 0660, bma250_reg_show, bma250_reg_store);
-static DEVICE_ATTR(value, 0660, bma250_value_show, bma250_value_store);
+static DEVICE_ATTR(value, 0640, bma250_value_show, bma250_value_store);
 
 static struct attribute *bma250_attributes[] = {
     &dev_attr_bandwidth.attr,
@@ -869,8 +872,11 @@ static void bma250_irq_work(struct work_struct *work)
     {
         bma250_read_accel_xyz(bma250);
 
-        if (bma250->polling_times == 0)
-            GSENSOR_DEBUG(LEVEL1, "x = %3d, y = %3d, z = %3d", bma250->value.x, bma250->value.y, bma250->value.z);
+        if (bma250->polling_times == 0 || bma250->polling_times == 9)
+            GSENSOR_DEBUG(LEVEL0, "%d) x = %3d, y = %3d, z = %3d", bma250->polling_times, bma250->value.x, bma250->value.y, bma250->value.z);
+        if (abs(bma250->value.x) > 400 || abs(bma250->value.y) > 400 || abs(bma250->value.z) > 400)
+            bma250->polling_times = 0;
+
         bma250->polling_times++;
         if (bma250->polling_times < 10)
             schedule_delayed_work(&bma250->irq_work, msecs_to_jiffies(100));
