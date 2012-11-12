@@ -49,6 +49,10 @@ extern unsigned int fih_get_power_on_cause(void);
 
 #define BATT_POLLING_STATUS_CHARGING		30
 #define BATT_POLLING_STATUS_DISCHARGING		60
+
+#define CAPACITY_SCALING_BASE (80)
+#define CAPACITY_SCALING_APPLY_LIMIT (85)
+
 /* FIH-SW3-KERNEL-VH-CHARGING-16*] */
 void bq27520_resch_change_polling_timeout(int second, int modify_timeout);
 void bq27520_change_polling_timeout(int second);
@@ -607,6 +611,8 @@ static int msm_batt_get_batt_chg_status(void)
 void msm_batt_update_psy_status(void)
 {
 	static u32 unnecessary_event_count;
+	static u32 batt_capacity_scaling_x100 = 100;
+	u32	scaling_batt_capacity = 255;
 	u32	charger_status;
 	u32	charger_type;
 	u32	battery_status;
@@ -837,17 +843,46 @@ void msm_batt_update_psy_status(void)
 		}
 	}
 
-    /* FIH-SW3-KERNEL-PK-CHARGING-23*[ */
-    if (((battery_level == BATTERY_LEVEL_FULL) || (batt_capacity >= 100)) &&
-		(msm_batt_info.batt_status == POWER_SUPPLY_STATUS_CHARGING)) {
-        msm_batt_info.batt_status = POWER_SUPPLY_STATUS_FULL;
-        batt_capacity = 100;
-    }
-    /* FIH-SW3-KERNEL-PK-CHARGING-23*] */
+	/* FIH-SW3-KERNEL-PK-CHARGING-25*[ */
+	if ((msm_batt_info.batt_status == POWER_SUPPLY_STATUS_CHARGING)){
+		if ((battery_level == BATTERY_LEVEL_FULL) || (batt_capacity == 100)) {		
+			if ((batt_capacity < 100) && (batt_capacity >= CAPACITY_SCALING_APPLY_LIMIT))
+				batt_capacity_scaling_x100 = ((100 - CAPACITY_SCALING_BASE)*100)/(batt_capacity - CAPACITY_SCALING_BASE -1)+1;			
+			else
+				batt_capacity_scaling_x100 = 100;
+			
+			msm_batt_info.batt_status = POWER_SUPPLY_STATUS_FULL;
+		}
+	}
 
-    /* FIH-SW3-KERNEL-PK-CHARGING-24*[ */	
-    /* Add UI smooth function for maintenance charging */
-    if ((batt_capacity >= 90) && (msm_batt_info.batt_capacity > 1)) {
+	if ((batt_capacity_scaling_x100 > 100) && (batt_capacity >= CAPACITY_SCALING_BASE)) {
+		scaling_batt_capacity = ((batt_capacity - CAPACITY_SCALING_BASE)*batt_capacity_scaling_x100/100) + CAPACITY_SCALING_BASE;
+
+		if (scaling_batt_capacity > 100)
+			scaling_batt_capacity = 100;
+
+		if (msm_batt_info.batt_status == POWER_SUPPLY_STATUS_CHARGING) {
+			if (scaling_batt_capacity == 100)
+				msm_batt_info.batt_status = POWER_SUPPLY_STATUS_FULL;
+			else if ((batt_capacity_scaling_x100 > 100) && (scaling_batt_capacity >= msm_batt_info.batt_capacity))
+				batt_capacity_scaling_x100 -= 1; /* Decrease scaling factor while charging again. */
+
+			if ((scaling_batt_capacity < msm_batt_info.batt_capacity) && !(battery_flags & 0x1))
+				 scaling_batt_capacity = msm_batt_info.batt_capacity;
+			
+			if (scaling_batt_capacity == batt_capacity)
+				batt_capacity_scaling_x100 = 100;
+		} else if (msm_batt_info.batt_status == POWER_SUPPLY_STATUS_DISCHARGING) {
+			if (scaling_batt_capacity <= batt_capacity)
+				batt_capacity_scaling_x100 = 100;
+		}
+
+		batt_capacity = scaling_batt_capacity;
+	} else if (batt_capacity < CAPACITY_SCALING_BASE) {
+		batt_capacity_scaling_x100 = 100;
+	}
+		
+    if ((batt_capacity >= CAPACITY_SCALING_BASE) && (msm_batt_info.batt_capacity > 1)) {
         if (msm_batt_info.batt_capacity > batt_capacity)
             batt_capacity = msm_batt_info.batt_capacity -1;
         else if ((msm_batt_info.batt_capacity < batt_capacity) &&
@@ -877,7 +912,7 @@ void msm_batt_update_psy_status(void)
 			DBG_LIMIT("BATT: Change polling timer to %d seconds.\n", BATT_POLLING_STATUS_CHARGING);
 		}			
 	}
-    /* FIH-SW3-KERNEL-PK-CHARGING-24*] */	
+    /* FIH-SW3-KERNEL-PK-CHARGING-25*] */	
 
     if (battery_status == BATTERY_STATUS_BAD_TEMP) {
         DBG_LIMIT("BATT: BAD_TEMP => NOT_CHARGING\n");
@@ -894,7 +929,7 @@ void msm_batt_update_psy_status(void)
     msm_batt_info.batt_capacity 	= batt_capacity;
     msm_batt_info.battery_voltage 	= battery_voltage;
 
-    pr_info("BATT: %d, %d, %d, %d, %d, %d, %d, %d\n",
+    pr_info("BATT: %d, %d, %d, %d, %d, %3d, %3d, %d, %d, %3d\n",
      msm_batt_info.charger_status,
      msm_batt_info.charger_type,
      msm_batt_info.battery_status,
@@ -902,7 +937,9 @@ void msm_batt_update_psy_status(void)
      msm_batt_info.battery_voltage,
      msm_batt_info.battery_temp,
      msm_batt_info.batt_capacity,     
-     msm_batt_info.batt_status   
+     msm_batt_info.batt_status,
+     batt_capacity_scaling_x100,
+     scaling_batt_capacity
      );
 	
     if (!supp)

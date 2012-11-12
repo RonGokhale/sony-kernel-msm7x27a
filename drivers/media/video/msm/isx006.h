@@ -17,11 +17,11 @@
 #include <mach/board.h>
 #include "fih_cam_api.h"
 
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+#define offset_size    1002
 extern struct isx006_reg isx006_regs;
-/* FIH-SW3-MM-UW-flash tuning-00+*/
-extern int16_t x_1_5[];
-extern int16_t x_2[];
-/* FIH-SW3-MM-UW-flash tuning-00-*/
+extern int16_t x_8[offset_size];
+/* FIH-SW3-MM-UW-flash tuning-04-*/
 
 enum isx006_device_status {
 	STS_POWER_DOWN = 0,

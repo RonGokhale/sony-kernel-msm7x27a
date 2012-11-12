@@ -425,6 +425,23 @@ struct fih_i2c_reg_conf mt9v115_stream_stop_array[] = {
 };
 /*MM-UW-improve camera performance-00-*/
 
+#if 1//FIH-SW-MM-MC-PortingNewSettingFor15And30FPS-00*{
+struct fih_i2c_reg_conf mt9v115_fps_30_settings_array [] = {
+    { 0x300A, 0x01F9, WORD_LEN, 0 },
+    { 0x098E, 0x2076, WORD_LEN, 0 },
+    { 0xA076, 0x0003, WORD_LEN, 0 },
+    { 0xA078, 0x0004, WORD_LEN, 0 },
+    { 0xA01A, 0x0003, WORD_LEN, 0 }
+};
+
+struct fih_i2c_reg_conf mt9v115_fps_15_settings_array [] = {
+    { 0x300A, 0x03BE, WORD_LEN, 0 },
+    { 0x098E, 0x2076, WORD_LEN, 0 },
+    { 0xA076, 0x0006, WORD_LEN, 0 },
+    { 0xA078, 0x0007, WORD_LEN, 0 },
+    { 0xA01A, 0x0006, WORD_LEN, 0 }
+};
+#else
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-01+{ */	
 struct fih_i2c_reg_conf mt9v115_fps_30_settings_array [] = {
     { 0x300A, 0x01F9, WORD_LEN, 0 },
@@ -462,6 +479,7 @@ struct fih_i2c_reg_conf mt9v115_fps_15_settings_array [] = {
     { 0xA01A, 0x06,   BYTE_LEN, 0 }
 };
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-01+} */	
+#endif//FIH-SW-MM-MC-PortingNewSettingFor15And30FPS-00*}
 
 struct mt9v115_reg mt9v115_regs = {
     .reg_init_tbl = mt9v115_init_settings_array,

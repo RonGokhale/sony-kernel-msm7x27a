@@ -15,11 +15,13 @@
 #include <mach/msm_iomap.h>
 #include <mach/msm_bus.h>
 #include <mach/socinfo.h>
+#include <linux/delay.h>/*MTD-MM-CL-GpuHang_PATCH-01+ */
 
 #include "kgsl.h"
 #include "kgsl_pwrscale.h"
 #include "kgsl_device.h"
 #include "kgsl_trace.h"
+#include "a2xx_reg.h"/*MTD-MM-CL-GpuHang_PATCH-01+ */
 
 #define KGSL_PWRFLAGS_POWER_ON 0
 #define KGSL_PWRFLAGS_CLK_ON   1
@@ -340,9 +342,27 @@ void kgsl_pwrctrl_clk(struct kgsl_device *device, int state,
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	int i = 0;
+/*MTD-MM-CL-GpuHang_PATCH-01+{ */
+	static unsigned int orig_REG_CP_DEBUG = 0;
+	static unsigned int orig_REG_RBBM_PM_OVERRIDE1 = 0;
+	static unsigned int orig_REG_RBBM_PM_OVERRIDE2 = 0;
+/*MTD-MM-CL-GpuHang_PATCH-01+} */
 	if (state == KGSL_PWRFLAGS_OFF) {
 		if (test_and_clear_bit(KGSL_PWRFLAGS_CLK_ON,
 			&pwr->power_flags)) {
+/*MTD-MM-CL-GpuHang_PATCH-01+{ */
+			/* Backup */
+			device->ftbl->regread(device, REG_CP_DEBUG, &orig_REG_CP_DEBUG);
+			device->ftbl->regread(device, REG_RBBM_PM_OVERRIDE1, &orig_REG_RBBM_PM_OVERRIDE1);
+			device->ftbl->regread(device, REG_RBBM_PM_OVERRIDE2, &orig_REG_RBBM_PM_OVERRIDE2);
+
+			/* Disable overrides */
+			device->ftbl->regwrite(device, REG_CP_DEBUG, orig_REG_CP_DEBUG | (1 << 27));
+			device->ftbl->regwrite(device, REG_RBBM_PM_OVERRIDE1, orig_REG_RBBM_PM_OVERRIDE1 | 0xfffffffe);
+			device->ftbl->regwrite(device, REG_RBBM_PM_OVERRIDE2, orig_REG_RBBM_PM_OVERRIDE2 | 0xffffffff);
+
+			msleep(1);
+/*MTD-MM-CL-GpuHang_PATCH-01+} */
 			trace_kgsl_clk(device, state);
 			for (i = KGSL_MAX_CLKS - 1; i > 0; i--)
 				if (pwr->grp_clks[i])
@@ -370,6 +390,17 @@ void kgsl_pwrctrl_clk(struct kgsl_device *device, int state,
 				if (pwr->grp_clks[i])
 					clk_enable(pwr->grp_clks[i]);
 			kgsl_pwrctrl_busy_time(device, false);
+/*MTD-MM-CL-GpuHang_PATCH-01+{ */
+			/* if backup available, overrides have been disabled. Wait for sometime & use restore overrides */
+			if(0 != orig_REG_CP_DEBUG) {
+				msleep(2);
+				device->ftbl->regwrite(device, REG_CP_DEBUG, orig_REG_CP_DEBUG);
+				device->ftbl->regwrite(device, REG_RBBM_PM_OVERRIDE1, orig_REG_RBBM_PM_OVERRIDE1);
+				device->ftbl->regwrite(device, REG_RBBM_PM_OVERRIDE2, orig_REG_RBBM_PM_OVERRIDE2);
+			}
+			KGSL_DRV_ERR(device, "overrides 0x%08x 0x%08x 0x%08x\n", orig_REG_CP_DEBUG,
+			orig_REG_RBBM_PM_OVERRIDE1, orig_REG_RBBM_PM_OVERRIDE2);
+/*MTD-MM-CL-GpuHang_PATCH-01+} */
 		}
 	}
 }

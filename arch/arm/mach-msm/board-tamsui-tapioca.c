@@ -1500,7 +1500,7 @@ static struct cyttsp_platform_data cypress_i2c_ttsp_platform_data = {
 	.use_st = 0, /*support single-touch FIH-SW3-PERIPHERAL-CH-TouchDriver_Porting_2010-02+*/
 	.use_mt = 1, /*support multi-touch FIH-SW3-PERIPHERAL-CH-TouchDriver_Porting_2010-02+*/
 	.use_trk_id = 1, /*FIH-MTD-PERIPHERAL-CH-TRACKING_ID-00++*/
-	.use_hndshk = 1, /*FIH-MTD-PERIPHERAL-CH-2016-00*/
+	.use_hndshk = 0, /*FIH-MTD-PERIPHERAL-CH-Handshake-00++*/
 	.use_timer = 0, /*use polling*/
 	.use_sleep = 1, /*deep sleep mode for early suspend/late resume*/
 	.use_gestures = 0, /*use gestures function*/
@@ -1666,7 +1666,7 @@ static struct msm_i2c_platform_data msm_gsbi1_qup_i2c_pdata = {
 #define MSM_PMEM_MDP_SIZE       0x1500000/*MTD-SW-MM-CL-PMEMusage-00* //0x2300000 */
 #define MSM7x25A_MSM_PMEM_MDP_SIZE       0x1500000
 
-#define MSM_PMEM_ADSP_SIZE      0xD00000//0x1100000  /*MTD-SW-MM-SL-CustmizeAdspSize-02 */
+#define MSM_PMEM_ADSP_SIZE      0x1500000//0x1100000  /*MTD-SW-MM-SL-CustmizeAdspSize-03 */
 #define MSM7x25A_MSM_PMEM_ADSP_SIZE      0xB91000
 
 

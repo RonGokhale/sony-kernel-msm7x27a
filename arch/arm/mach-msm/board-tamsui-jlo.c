@@ -1326,11 +1326,11 @@ static struct qpdss702_platform_data qpdss702_platform_data = {
 static ssize_t tma340_virtual_keys_show(struct kobject *kobj,
                                struct kobj_attribute *attr, char *buf)
 {
-/* center: x: back: 53, menu: 160, home: 267, y: 523 SHIFT for moving down 14 points away  TOUCH AA */
+/* center: x: back: 65, menu: 415, home: 240, y: 912 SHIFT for moving down 14 points away  TOUCH AA */
 				return sprintf(buf,
-                      __stringify(EV_KEY) ":" __stringify(KEY_BACK)    ":80:915:80:102"
-                   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)  ":240:915:80:102"
-                   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU)  ":400:915:80:102"
+                      __stringify(EV_KEY) ":" __stringify(KEY_BACK)    ":65:912:130:102"
+                   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)  ":240:912:130:102"
+                   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU)  ":415:912:130:102"
                    "\n");
 }
 
@@ -1510,7 +1510,7 @@ static struct cyttsp_platform_data cypress_i2c_ttsp_platform_data = {
 	.use_st = 0, /*support single-touch*/
 	.use_mt = 1, /*support multi-touch*/
 	.use_trk_id = 1, 
-	.use_hndshk = 1, 
+	.use_hndshk = 0, /*FIH-MTD-PERIPHERAL-CH-Handshake-00++*/
 	.use_timer = 0, /*use polling*/
 	.use_sleep = 1, /*deep sleep mode for early suspend/late resume*/
 	.use_gestures = 0, /*use gestures function*/

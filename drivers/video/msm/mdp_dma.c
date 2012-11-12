@@ -267,7 +267,8 @@ enum hrtimer_restart mdp_dma2_vsync_hrtimer_handler(struct hrtimer *ht)
 
 	mfd = container_of(ht, struct msm_fb_data_type, dma_hrtimer);
 
-	mdp_pipe_kickoff(MDP_DMA2_TERM, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+	mdp_pipe_kickoff(MDP_DMA2_TERM, mfd, NULL);
 
 	if (msm_fb_debug_enabled) {
 		ktime_t t;
@@ -355,7 +356,8 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 
 	if ((!mfd->ibuf.vsync_enable) || (!mfd->panel_info.lcd.vsync_enable)
 	    || (mfd->use_mdp_vsync)) {
-		mdp_pipe_kickoff(term, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+		mdp_pipe_kickoff(term, mfd, NULL);
 		return;
 	}
 	/* SW vsync logic starts here */
@@ -434,7 +436,8 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 	mdp_last_dma2_update_height = mdp_curr_dma2_update_height;
 
 	if (usec_wait_time == 0) {
-		mdp_pipe_kickoff(term, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+		mdp_pipe_kickoff(term, mfd, NULL);
 	} else {
 		ktime_t wait_time;
 

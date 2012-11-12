@@ -96,6 +96,9 @@
 #define SET_HSTMODE(reg, mode)      ((reg) & (mode))
 #define GET_HSTMODE(reg)            ((reg & 0x70) >> 4)
 #define GET_BOOTLOADERMODE(reg)     ((reg & 0x10) >> 4)
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#define GET_CHANGEMODEBIT(reg)     ((reg & 0x08) >> 3)
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 
 /* maximum number of concurrent ST track IDs */
 #define CY_NUM_ST_TCH_ID            2
@@ -376,7 +379,15 @@ enum ts_state {
 };
 
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++[*/
-static int TMA340_APP_ver=0;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CONFIG_FIH_MACH_TAMSUI_TAP
+static int TMA340_APP_ver=8;
+#elif defined(CONFIG_FIH_MACH_TAMSUI_MES)
+static int TMA340_APP_ver=6;
+#else
+static int TMA340_APP_ver=4;
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 module_param(
     TMA340_APP_ver, int, S_IRUGO
 );
@@ -1521,9 +1532,14 @@ static int cyttsp_set_sysinfo_mode(struct cyttsp *ts)
 		(tries++ < (500/20)));
 
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++[*/	
-	temp_ver=ts->sysinfo_data.app_verh;
-	TMA340_APP_ver|=temp_ver<<8;
-	TMA340_APP_ver|=ts->sysinfo_data.app_verl;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+	if(ts->sysinfo_data.app_verl != 0)
+	{
+		temp_ver=ts->sysinfo_data.app_verh;
+		TMA340_APP_ver=temp_ver<<8;/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++*/
+		TMA340_APP_ver|=ts->sysinfo_data.app_verl;
+	}
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++]*/
 	DBG_INFO("%s: read tries=%d\n", __func__, tries);
 
@@ -1776,6 +1792,12 @@ static int cyttsp_power_on(struct cyttsp *ts)
 	u8 data = 0;
 #endif
 /*FIH-MTD-PERIPHERAL-CH-ESD-01++]*/
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CYTTSP_CM_bit
+	int retry=0;
+	u8  CM_BYTE=0;
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 
 	DBG_INFO("%s: Enter\n", __func__);
 
@@ -1805,10 +1827,36 @@ static int cyttsp_power_on(struct cyttsp *ts)
 
 	/* switch to System Information mode to read */
 	/* versions and set interval registers */
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CYTTSP_CM_bit
+	retval=cyttsp_rd_reg(ts, CY_REG_BASE, &CM_BYTE);
+	if(retval<0)
+		goto bypass;
+	msleep(28);
+	CM_BYTE |= 0x08;
+	retval=cyttsp_wr_reg(ts, CY_REG_BASE, CM_BYTE);
+	if(retval<0)
+		goto bypass;
+	do{
+	msleep(28);
 	retval = cyttsp_set_sysinfo_mode(ts);
 	if (retval < 0)
 		goto bypass;
-
+	msleep(28);
+	retval=cyttsp_rd_reg(ts, CY_REG_BASE, &CM_BYTE);
+	DBG_INFO("%s:CM_BYTE=%x,retval=%d\r\n",__func__,CM_BYTE,retval);
+	retry++;
+	}while(retry < 5 && ((GET_CHANGEMODEBIT(CM_BYTE)==1)|| retval<0 ));
+	DBG_INFO("%s:CM_BYTE=%x,retry=%d\r\n",__func__,CM_BYTE,retry);
+	msleep(28);
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++[*/
+#else
+	retval = cyttsp_set_sysinfo_mode(ts);
+	if (retval < 0)
+		goto bypass;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++]*/
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 	retval = cyttsp_set_sysinfo_regs(ts);
 	if (retval < 0)
 		goto bypass;
